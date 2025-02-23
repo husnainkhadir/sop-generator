@@ -3,36 +3,40 @@ export async function startScreenRecording() {
     video: { frameRate: { ideal: 30 } },
   });
 
-  // Add recording border
-  const border = document.createElement('div');
-  border.id = 'recording-border';
-  border.style.cssText = `
+  // Create a floating recording indicator
+  const indicator = document.createElement('div');
+  indicator.id = 'recording-indicator';
+  indicator.style.cssText = `
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    border: 4px solid red;
+    top: 16px;
+    right: 16px;
+    padding: 8px 16px;
+    background: rgba(255, 0, 0, 0.8);
+    color: white;
+    border-radius: 4px;
+    font-size: 14px;
+    font-family: sans-serif;
     pointer-events: none;
-    z-index: 9999;
+    z-index: 999999;
     animation: pulse 2s infinite;
   `;
+  indicator.textContent = '🔴 Recording';
 
   // Add pulse animation
   const style = document.createElement('style');
   style.textContent = `
     @keyframes pulse {
-      0% { border-color: rgba(255, 0, 0, 1); }
-      50% { border-color: rgba(255, 0, 0, 0.5); }
-      100% { border-color: rgba(255, 0, 0, 1); }
+      0% { opacity: 1; }
+      50% { opacity: 0.7; }
+      100% { opacity: 1; }
     }
   `;
   document.head.appendChild(style);
-  document.body.appendChild(border);
+  document.body.appendChild(indicator);
 
   // Clean up when stream ends
   stream.getVideoTracks()[0].onended = () => {
-    border.remove();
+    indicator.remove();
     style.remove();
   };
 
@@ -55,7 +59,9 @@ export async function captureScreenshot(stream: MediaStream): Promise<string> {
   canvas.width = bitmap.width;
   canvas.height = bitmap.height;
   const ctx = canvas.getContext('2d');
-  ctx?.drawImage(bitmap, 0, 0);
+  if (ctx) {
+    ctx.drawImage(bitmap, 0, 0);
+  }
 
   return canvas.toDataURL('image/png');
 }
@@ -66,10 +72,10 @@ export function createMediaRecorder(stream: MediaStream, onDataAvailable: (blob:
   return mediaRecorder;
 }
 
-// Clean up recording border if it exists
+// Clean up recording indicator if it exists
 export function cleanupRecordingBorder() {
-  const border = document.getElementById('recording-border');
+  const indicator = document.getElementById('recording-indicator');
   const style = document.querySelector('style');
-  if (border) border.remove();
-  if (style && style.textContent.includes('pulse')) style.remove();
+  if (indicator) indicator.remove();
+  if (style?.textContent.includes('pulse')) style.remove();
 }
