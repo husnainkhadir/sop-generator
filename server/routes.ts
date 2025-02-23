@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { createServer } from "http";
+import { WebSocketServer, WebSocket } from "ws";
 import multer from "multer";
 import { storage } from "./storage";
 import { insertSopSchema, insertStepSchema } from "@shared/schema";
@@ -12,6 +13,51 @@ const upload = multer({
 
 export async function registerRoutes(app: Express) {
   const httpServer = createServer(app);
+
+  // Set up WebSocket server for real-time transcription
+  const wss = new WebSocketServer({ 
+    server: httpServer, 
+    path: '/ws/transcribe'
+  });
+
+  wss.on('connection', (ws) => {
+    console.log('Client connected for real-time transcription');
+    let audioChunks: Buffer[] = [];
+
+    ws.on('message', async (data) => {
+      const message = JSON.parse(data.toString());
+
+      if (message.type === 'audio') {
+        // Convert base64 audio to buffer
+        const audioChunk = Buffer.from(message.data, 'base64');
+        audioChunks.push(audioChunk);
+
+        // Every 5 seconds of audio (or when we receive a "complete" message),
+        // send for transcription
+        if (audioChunks.length >= 5 || message.final) {
+          const audioBuffer = Buffer.concat(audioChunks);
+          try {
+            const transcription = await transcribeAudio(audioBuffer);
+            ws.send(JSON.stringify({
+              type: 'transcription',
+              data: transcription
+            }));
+            audioChunks = []; // Clear chunks after processing
+          } catch (error) {
+            ws.send(JSON.stringify({
+              type: 'error',
+              message: 'Failed to transcribe audio'
+            }));
+          }
+        }
+      }
+    });
+
+    ws.on('close', () => {
+      console.log('Client disconnected from transcription');
+      audioChunks = []; // Clear any remaining chunks
+    });
+  });
 
   // SOP endpoints
   app.post("/api/sops", async (req, res) => {

@@ -14,18 +14,40 @@ interface RecorderProps {
 export function Recorder({ onStepRecorded }: RecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string>();
+  const [currentTranscription, setCurrentTranscription] = useState<string>("");
   const screenStreamRef = useRef<MediaStream>();
   const audioStreamRef = useRef<MediaStream>();
   const mediaRecorderRef = useRef<MediaRecorder>();
   const recordedChunksRef = useRef<Blob[]>([]);
+  const wsRef = useRef<WebSocket>();
 
   useEffect(() => {
     return () => {
       screenStreamRef.current?.getTracks().forEach(track => track.stop());
       audioStreamRef.current?.getTracks().forEach(track => track.stop());
       cleanupRecordingBorder();
+      wsRef.current?.close();
     };
   }, []);
+
+  const setupWebSocket = () => {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/ws/transcribe`;
+    const ws = new WebSocket(wsUrl);
+
+    ws.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.type === 'transcription') {
+        setCurrentTranscription(prev => prev + " " + message.data);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error("WebSocket error:", error);
+    };
+
+    wsRef.current = ws;
+  };
 
   const startRecording = async () => {
     try {
@@ -35,6 +57,29 @@ export function Recorder({ onStepRecorded }: RecorderProps) {
       screenStreamRef.current = screenStream;
       audioStreamRef.current = audioStream;
 
+      // Set up WebSocket for real-time transcription
+      setupWebSocket();
+
+      // Create a separate audio recorder for streaming to WebSocket
+      const audioRecorder = new MediaRecorder(audioStream);
+      audioRecorder.ondataavailable = async (e) => {
+        if (wsRef.current?.readyState === WebSocket.OPEN && e.data.size > 0) {
+          // Convert blob to base64
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64Audio = (reader.result as string).split(',')[1];
+            wsRef.current?.send(JSON.stringify({
+              type: 'audio',
+              data: base64Audio,
+              final: false
+            }));
+          };
+          reader.readAsDataURL(e.data);
+        }
+      };
+      audioRecorder.start(1000); // Collect data every second
+
+      // Set up main recorder for final recording
       const combinedStream = new MediaStream([
         ...screenStream.getVideoTracks(),
         ...audioStream.getAudioTracks()
@@ -47,6 +92,7 @@ export function Recorder({ onStepRecorded }: RecorderProps) {
       mediaRecorderRef.current = mediaRecorder;
       mediaRecorder.start();
       setIsRecording(true);
+      setCurrentTranscription(""); // Reset transcription
 
       // Set up preview
       const video = document.createElement('video');
@@ -69,6 +115,11 @@ export function Recorder({ onStepRecorded }: RecorderProps) {
       mediaRecorderRef.current.stop();
       screenStreamRef.current.getTracks().forEach(track => track.stop());
       audioStreamRef.current?.getTracks().forEach(track => track.stop());
+
+      // Close WebSocket
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.close();
+      }
 
       // Create final recording blob
       const recordingBlob = new Blob(recordedChunksRef.current, {
@@ -100,6 +151,13 @@ export function Recorder({ onStepRecorded }: RecorderProps) {
             </div>
           )}
         </div>
+
+        {isRecording && currentTranscription && (
+          <div className="p-4 bg-muted rounded-lg">
+            <p className="text-sm text-muted-foreground">Live Transcription:</p>
+            <p className="mt-2">{currentTranscription}</p>
+          </div>
+        )}
 
         <div className="flex gap-2 justify-center">
           {!isRecording ? (
