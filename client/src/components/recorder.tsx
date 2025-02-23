@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { startScreenRecording, startAudioRecording, captureScreenshot, createMediaRecorder } from "@/lib/media";
+import { startScreenRecording, startAudioRecording, captureScreenshot, createMediaRecorder, cleanupRecordingBorder } from "@/lib/media";
 import { Loader2, Video, Mic, Camera, Square, StopCircle } from "lucide-react";
 
 interface RecorderProps {
@@ -23,6 +23,7 @@ export function Recorder({ onStepRecorded }: RecorderProps) {
     return () => {
       screenStreamRef.current?.getTracks().forEach(track => track.stop());
       audioStreamRef.current?.getTracks().forEach(track => track.stop());
+      cleanupRecordingBorder();
     };
   }, []);
 
@@ -30,10 +31,10 @@ export function Recorder({ onStepRecorded }: RecorderProps) {
     try {
       const screenStream = await startScreenRecording();
       const audioStream = await startAudioRecording();
-      
+
       screenStreamRef.current = screenStream;
       audioStreamRef.current = audioStream;
-      
+
       const combinedStream = new MediaStream([
         ...screenStream.getVideoTracks(),
         ...audioStream.getAudioTracks()
@@ -42,7 +43,7 @@ export function Recorder({ onStepRecorded }: RecorderProps) {
       const mediaRecorder = createMediaRecorder(combinedStream, (blob) => {
         recordedChunksRef.current.push(blob);
       });
-      
+
       mediaRecorderRef.current = mediaRecorder;
       mediaRecorder.start();
       setIsRecording(true);
@@ -53,6 +54,7 @@ export function Recorder({ onStepRecorded }: RecorderProps) {
       video.play();
     } catch (error) {
       console.error("Failed to start recording:", error);
+      cleanupRecordingBorder();
     }
   };
 
@@ -62,23 +64,27 @@ export function Recorder({ onStepRecorded }: RecorderProps) {
     try {
       // Capture final screenshot
       const screenshot = await captureScreenshot(screenStreamRef.current);
-      
+
       // Stop recording
       mediaRecorderRef.current.stop();
       screenStreamRef.current.getTracks().forEach(track => track.stop());
       audioStreamRef.current?.getTracks().forEach(track => track.stop());
-      
+
       // Create final recording blob
       const recordingBlob = new Blob(recordedChunksRef.current, {
         type: "video/webm"
       });
-      
+
       onStepRecorded({ screenshot, recordingBlob });
       setPreviewUrl(screenshot);
       setIsRecording(false);
       recordedChunksRef.current = [];
+
+      // Clean up recording border
+      cleanupRecordingBorder();
     } catch (error) {
       console.error("Failed to stop recording:", error);
+      cleanupRecordingBorder();
     }
   };
 
@@ -94,7 +100,7 @@ export function Recorder({ onStepRecorded }: RecorderProps) {
             </div>
           )}
         </div>
-        
+
         <div className="flex gap-2 justify-center">
           {!isRecording ? (
             <Button onClick={startRecording} className="gap-2">
