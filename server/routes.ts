@@ -25,31 +25,40 @@ export async function registerRoutes(app: Express) {
     let audioChunks: Buffer[] = [];
 
     ws.on('message', async (data) => {
-      const message = JSON.parse(data.toString());
+      try {
+        const message = JSON.parse(data.toString());
 
-      if (message.type === 'audio') {
-        // Convert base64 audio to buffer
-        const audioChunk = Buffer.from(message.data, 'base64');
-        audioChunks.push(audioChunk);
+        if (message.type === 'audio') {
+          // Convert base64 audio to buffer
+          const audioChunk = Buffer.from(message.data, 'base64');
+          audioChunks.push(audioChunk);
 
-        // Every 5 seconds of audio (or when we receive a "complete" message),
-        // send for transcription
-        if (audioChunks.length >= 5 || message.final) {
-          const audioBuffer = Buffer.concat(audioChunks);
-          try {
-            const transcription = await transcribeAudio(audioBuffer);
-            ws.send(JSON.stringify({
-              type: 'transcription',
-              data: transcription
-            }));
-            audioChunks = []; // Clear chunks after processing
-          } catch (error) {
-            ws.send(JSON.stringify({
-              type: 'error',
-              message: 'Failed to transcribe audio'
-            }));
+          // Process every 3 seconds of audio for more responsive transcription
+          if (audioChunks.length >= 3 || message.final) {
+            const audioBuffer = Buffer.concat(audioChunks);
+
+            try {
+              console.log('Processing audio chunk of size:', audioBuffer.length);
+              const transcription = await transcribeAudio(audioBuffer);
+              console.log('Transcription result:', transcription);
+
+              ws.send(JSON.stringify({
+                type: 'transcription',
+                data: transcription
+              }));
+
+              audioChunks = []; // Clear chunks after processing
+            } catch (error) {
+              console.error('Transcription error:', error);
+              ws.send(JSON.stringify({
+                type: 'error',
+                message: 'Failed to transcribe audio'
+              }));
+            }
           }
         }
+      } catch (error) {
+        console.error('WebSocket message processing error:', error);
       }
     });
 
@@ -109,10 +118,12 @@ export async function registerRoutes(app: Express) {
     }
 
     try {
+      console.log('Processing audio file of size:', req.file.size);
       const transcription = await transcribeAudio(req.file.buffer);
       const refinedContent = await refineInstruction(transcription);
       res.json({ transcription, refinedContent });
     } catch (error) {
+      console.error('Transcription error:', error);
       res.status(500).json({ error: "Failed to process audio" });
     }
   });

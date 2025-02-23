@@ -20,11 +20,13 @@ export function Recorder({ onStepRecorded }: RecorderProps) {
   const mediaRecorderRef = useRef<MediaRecorder>();
   const recordedChunksRef = useRef<Blob[]>([]);
   const wsRef = useRef<WebSocket>();
+  const audioRecorderRef = useRef<MediaRecorder>();
 
   useEffect(() => {
     return () => {
       screenStreamRef.current?.getTracks().forEach(track => track.stop());
       audioStreamRef.current?.getTracks().forEach(track => track.stop());
+      audioRecorderRef.current?.stop();
       cleanupRecordingBorder();
       wsRef.current?.close();
     };
@@ -35,10 +37,17 @@ export function Recorder({ onStepRecorded }: RecorderProps) {
     const wsUrl = `${protocol}//${window.location.host}/ws/transcribe`;
     const ws = new WebSocket(wsUrl);
 
+    ws.onopen = () => {
+      console.log('WebSocket connected');
+    };
+
     ws.onmessage = (event) => {
       const message = JSON.parse(event.data);
       if (message.type === 'transcription') {
+        console.log('Received transcription:', message.data);
         setCurrentTranscription(prev => prev + " " + message.data);
+      } else if (message.type === 'error') {
+        console.error('Transcription error:', message.message);
       }
     };
 
@@ -61,9 +70,13 @@ export function Recorder({ onStepRecorded }: RecorderProps) {
       setupWebSocket();
 
       // Create a separate audio recorder for streaming to WebSocket
-      const audioRecorder = new MediaRecorder(audioStream);
+      const audioRecorder = new MediaRecorder(audioStream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+
       audioRecorder.ondataavailable = async (e) => {
         if (wsRef.current?.readyState === WebSocket.OPEN && e.data.size > 0) {
+          console.log('Sending audio chunk of size:', e.data.size);
           // Convert blob to base64
           const reader = new FileReader();
           reader.onload = () => {
@@ -77,6 +90,8 @@ export function Recorder({ onStepRecorded }: RecorderProps) {
           reader.readAsDataURL(e.data);
         }
       };
+
+      audioRecorderRef.current = audioRecorder;
       audioRecorder.start(1000); // Collect data every second
 
       // Set up main recorder for final recording
@@ -113,11 +128,16 @@ export function Recorder({ onStepRecorded }: RecorderProps) {
 
       // Stop recording
       mediaRecorderRef.current.stop();
+      audioRecorderRef.current?.stop();
       screenStreamRef.current.getTracks().forEach(track => track.stop());
       audioStreamRef.current?.getTracks().forEach(track => track.stop());
 
-      // Close WebSocket
+      // Send final audio chunk
       if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'audio',
+          final: true
+        }));
         wsRef.current.close();
       }
 
