@@ -1,71 +1,61 @@
-import { type Sop, type InsertSop, type Step, type InsertStep } from "@shared/schema";
+import { type Sop, type InsertSop, type Step, type InsertStep, sops, steps } from "@shared/schema";
+import { db } from "./db";
+import { eq } from "drizzle-orm";
 
 export interface IStorage {
   // SOP operations
   createSop(sop: InsertSop): Promise<Sop>;
   getSop(id: number): Promise<Sop | undefined>;
   listSops(): Promise<Sop[]>;
-  
+
   // Step operations
   createStep(step: InsertStep): Promise<Step>;
   getStepsBySopId(sopId: number): Promise<Step[]>;
   updateStep(id: number, step: Partial<InsertStep>): Promise<Step>;
 }
 
-export class MemStorage implements IStorage {
-  private sops: Map<number, Sop>;
-  private steps: Map<number, Step>;
-  private sopCurrentId: number;
-  private stepCurrentId: number;
-
-  constructor() {
-    this.sops = new Map();
-    this.steps = new Map();
-    this.sopCurrentId = 1;
-    this.stepCurrentId = 1;
-  }
-
+export class DatabaseStorage implements IStorage {
   async createSop(insertSop: InsertSop): Promise<Sop> {
-    const id = this.sopCurrentId++;
-    const sop: Sop = {
-      ...insertSop,
-      id,
-      createdAt: new Date(),
-    };
-    this.sops.set(id, sop);
+    const [sop] = await db.insert(sops).values(insertSop).returning();
     return sop;
   }
 
   async getSop(id: number): Promise<Sop | undefined> {
-    return this.sops.get(id);
+    const [sop] = await db.select().from(sops).where(eq(sops.id, id));
+    return sop;
   }
 
   async listSops(): Promise<Sop[]> {
-    return Array.from(this.sops.values());
+    return await db.select().from(sops);
   }
 
   async createStep(insertStep: InsertStep): Promise<Step> {
-    const id = this.stepCurrentId++;
-    const step: Step = { ...insertStep, id };
-    this.steps.set(id, step);
+    const [step] = await db.insert(steps).values(insertStep).returning();
     return step;
   }
 
   async getStepsBySopId(sopId: number): Promise<Step[]> {
-    return Array.from(this.steps.values())
-      .filter(step => step.sopId === sopId)
-      .sort((a, b) => a.order - b.order);
+    return await db
+      .select()
+      .from(steps)
+      .where(eq(steps.sopId, sopId))
+      .orderBy(steps.order);
   }
 
   async updateStep(id: number, updates: Partial<InsertStep>): Promise<Step> {
-    const existing = this.steps.get(id);
-    if (!existing) {
+    const [step] = await db
+      .update(steps)
+      .set(updates)
+      .where(eq(steps.id, id))
+      .returning();
+
+    if (!step) {
       throw new Error(`Step with id ${id} not found`);
     }
-    const updated = { ...existing, ...updates };
-    this.steps.set(id, updated);
-    return updated;
+
+    return step;
   }
 }
 
-export const storage = new MemStorage();
+// Replace MemStorage with DatabaseStorage
+export const storage = new DatabaseStorage();
